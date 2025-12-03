@@ -1,0 +1,532 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Role {
+  id    Int    @id @default(autoincrement())
+  name  String @unique
+  users User[]
+}
+
+model User {
+  id                Int            @id @default(autoincrement())
+  name              String
+  email             String         @unique
+  passwordHash      String
+
+  roleId            Int
+  role              Role           @relation(fields: [roleId], references: [id])
+
+  // User là giảng viên của các khóa học
+  instructorCourses Course[]       @relation("InstructorCourses")
+
+  // User là người review khóa học
+  reviewedCourses   Course[]       @relation("CourseReviewedBy")
+
+  // User là actor trong AuditLog
+  auditLogs         AuditLog[]     @relation("AuditActor")
+
+  enrollments       Enrollment[]
+  progress          UserProgress[]
+  chatLogs          ChatLog[]
+  certificates      Certificate[]
+  reviews           CourseReview[]
+  wishlist          Wishlist[]
+  bookmarks         Bookmark[]
+  notifications     Notification[]
+  passwordResetTokens PasswordResetToken[]
+  createdAt         DateTime       @default(now())
+
+  submissions Submission[]
+
+  activityLogs ActivityLog[]
+
+  alerts Alert[]
+
+  recommendations Recommendation[]
+
+  lessonQuestions LessonQuestion[]
+
+  roleRequests RoleRequest[]
+  handledRoleRequests RoleRequest[] @relation("RoleRequestAdmin")
+
+  learningPathsCreated LearningPath[] @relation("LearningPathCreator")
+  learningPathEnrollments LearningPathEnrollment[]
+  certificatesIssued Certificate[] @relation("CertificateIssuedBy")
+}
+
+model CourseCategory {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  courses     Course[]
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Course {
+  id              Int             @id @default(autoincrement())
+  title           String
+  description     String?
+
+  // Instructor (bắt buộc)
+  instructorId    Int
+  instructor      User            @relation("InstructorCourses", fields: [instructorId], references: [id])
+
+  // Category (tùy chọn)
+  categoryId      Int?
+  category        CourseCategory? @relation(fields: [categoryId], references: [id])
+
+  thumbnailUrl    String?
+  status          CourseStatus    @default(DRAFT)
+
+  // NEW: Featured & SEO
+  featured        Boolean         @default(false)
+  featuredRank    Int?
+  seoTitle        String?
+  seoDescription  String?
+  slug            String?         @unique
+
+  // NEW: Review info (User thứ 2 khác Instructor)
+  reviewedAt      DateTime?
+  reviewedById    Int?
+  reviewedBy      User?           @relation("CourseReviewedBy", fields: [reviewedById], references: [id])
+
+  // Back-relations
+  modules         CourseModule[]
+  enrollments     Enrollment[]
+  certificates    Certificate[]
+  reviews         CourseReview[]
+  wishlists       Wishlist[]
+
+  createdAt       DateTime        @default(now())
+
+  activityLogs ActivityLog[]
+
+  alerts Alert[]
+
+  recommendations Recommendation[]
+
+  coursePrerequisites CoursePrerequisite[] @relation("CoursePrerequisites")
+  requiredFor         CoursePrerequisite[] @relation("CourseRequiredFor")
+
+  learningPathItems LearningPathItem[]
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  createdAt  DateTime @default(now())
+
+  actorId    Int?
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id])
+
+  action     String   // "COURSE.PUBLISH", "COURSE.UNPUBLISH", "COURSE.FEATURE", "USER.ROLE_SET", ...
+  targetType String   // "course" | "user" | ...
+  targetId   Int?
+  ip         String?
+  ua         String?
+  meta       Json?
+}
+
+model CourseModule {
+  id          Int      @id @default(autoincrement())
+  courseId    Int
+  course      Course   @relation(fields: [courseId], references: [id])
+  title       String
+  description String?
+  order       Int
+  lessons     Lesson[]
+}
+
+model Lesson {
+  id          Int              @id @default(autoincrement())
+  moduleId    Int
+  module      CourseModule     @relation(fields: [moduleId], references: [id])
+  title       String
+  description String?
+  order       Int
+  blocks      LessonBlock[]
+  resources   LessonResource[]
+  progress    UserProgress[]
+  chatLogs    ChatLog[]
+  bookmarks   Bookmark[]
+  createdAt   DateTime         @default(now())
+
+  quizzes Quiz[]
+
+  activityLogs ActivityLog[]
+
+  recommendations Recommendation[]
+
+  lessonQuestions LessonQuestion[]
+
+  prerequisites LessonPrerequisite[] @relation("LessonPrerequisites")
+  requiredFor  LessonPrerequisite[] @relation("LessonRequiredFor")
+}
+
+model LessonBlock {
+  id            Int      @id @default(autoincrement())
+  lessonId      Int
+  lesson        Lesson   @relation(fields: [lessonId], references: [id])
+  blockType     String // 'TEXT', 'IMAGE', 'VIDEO', 'EMBED', 'ATTACHMENT', ...
+  displayOrder  Int
+  textMarkdown  String?
+  imageUrl      String?
+  imageAlt      String?
+  caption       String?
+  videoUrl      String?
+  videoDuration Int?
+  embedUrl      String?
+  fileUrl       String?
+  createdAt     DateTime @default(now())
+}
+
+model LessonResource {
+  id           Int      @id @default(autoincrement())
+  lessonId     Int
+  lesson       Lesson   @relation(fields: [lessonId], references: [id])
+  resourceType String // e.g., 'pdf', 'ppt', 'link'
+  resourceUrl  String
+  uploadedAt   DateTime @default(now())
+}
+
+model Enrollment {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  courseId   Int
+  user       User     @relation(fields: [userId], references: [id])
+  course     Course   @relation(fields: [courseId], references: [id])
+  enrolledAt DateTime @default(now())
+
+  @@unique([userId, courseId])
+}
+
+model UserProgress {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  lessonId     Int
+  isCompleted  Boolean  @default(false)
+  quizScore    Int?
+  lastAccessed DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id])
+  lesson       Lesson   @relation(fields: [lessonId], references: [id])
+
+  @@unique([userId, lessonId])
+}
+
+model ChatLog {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  lessonId    Int?
+  userMessage String
+  aiResponse  String
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+  lesson      Lesson?  @relation(fields: [lessonId], references: [id])
+}
+
+model Certificate {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  courseId       Int
+  issueDate      DateTime @default(now())
+  certificateUrl String?
+  verificationCode String  @unique @default(uuid())
+  issuedById     Int?
+  expiresAt      DateTime?
+  score          Int?
+  templateName   String? // e.g., "default", "gold"
+
+  issuedBy       User?    @relation("CertificateIssuedBy", fields: [issuedById], references: [id])
+  user           User     @relation(fields: [userId], references: [id])
+  course         Course   @relation(fields: [courseId], references: [id])
+}
+
+model CourseReview {
+  id        Int      @id @default(autoincrement())
+  courseId  Int
+  userId    Int
+  rating    Int
+  review    String?
+  createdAt DateTime @default(now())
+  course    Course   @relation(fields: [courseId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([courseId, userId])
+}
+
+model LessonQuestion {
+  id         Int       @id @default(autoincrement())
+  lessonId   Int
+  userId     Int
+  content    String
+  parentId   Int?
+  createdAt  DateTime  @default(now())
+  isDeleted  Boolean   @default(false)
+  lesson     Lesson    @relation(fields: [lessonId], references: [id])
+  user       User      @relation(fields: [userId], references: [id])
+  parent     LessonQuestion? @relation("QuestionReplies", fields: [parentId], references: [id])
+  replies    LessonQuestion[] @relation("QuestionReplies")
+}
+
+model Wishlist {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  courseId  Int
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  course    Course   @relation(fields: [courseId], references: [id])
+
+  @@unique([userId, courseId])
+}
+
+model Bookmark {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  lessonId  Int
+  blockId   Int?
+  note      String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  lesson    Lesson   @relation(fields: [lessonId], references: [id])
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  message   String
+  type      String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model PasswordResetToken {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  used       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+enum QuestionType {
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+  SHORT_TEXT
+}
+
+enum RoleRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model RoleRequest {
+  id            Int               @id @default(autoincrement())
+  userId        Int
+  user          User              @relation(fields: [userId], references: [id])
+  requestedRole String            // e.g., "instructor"
+  status        RoleRequestStatus @default(PENDING)
+  note          String?
+  adminId       Int?
+  admin         User?             @relation("RoleRequestAdmin", fields: [adminId], references: [id])
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([status, createdAt])
+  @@index([userId, status])
+}
+
+model Quiz {
+  id              Int          @id @default(autoincrement())
+  lessonId        Int          
+  lesson          Lesson       @relation(fields: [lessonId], references: [id])
+  title           String
+  description     String?
+  timeLimit       Int?
+  attemptsAllowed Int?
+  deadline        DateTime?
+  isPublished     Boolean      @default(false)
+  questions       Question[]
+  submissions     Submission[]
+  createdAt       DateTime     @default(now())
+
+  recommendations Recommendation[]
+}
+
+model Question {
+  id                Int          @id @default(autoincrement())
+  quizId            Int
+  quiz              Quiz         @relation(fields: [quizId], references: [id])
+  text              String
+  type              QuestionType
+  points            Int?
+  order             Int
+  correctTextAnswer String?
+  options           Option[]
+
+  answers Answer[]
+}
+
+model Option {
+  id         Int      @id @default(autoincrement())
+  questionId Int
+  question   Question @relation(fields: [questionId], references: [id])
+  text       String
+  isCorrect  Boolean  @default(false)
+  order      Int      @default(1)
+}
+
+model Submission {
+  id            Int       @id @default(autoincrement())
+  quizId        Int
+  quiz          Quiz      @relation(fields: [quizId], references: [id])
+  userId        Int
+  user          User      @relation(fields: [userId], references: [id])
+  attemptNumber Int
+  submittedAt   DateTime?
+  score         Int?
+  answers       Answer[]
+  createdAt     DateTime  @default(now())
+
+  @@index([quizId, userId])
+}
+
+model Answer {
+  id              Int        @id @default(autoincrement())
+  submissionId    Int
+  submission      Submission @relation(fields: [submissionId], references: [id])
+  questionId      Int
+  question        Question   @relation(fields: [questionId], references: [id])
+  selectedOptionIds Int[]    // Postgres int[]
+  textAnswer      String?
+  isCorrect       Boolean?
+  createdAt       DateTime   @default(now())
+
+  @@index([submissionId])
+  @@index([questionId])
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+
+  courseId  Int?
+  course    Course?  @relation(fields: [courseId], references: [id])
+
+  lessonId  Int?
+  lesson    Lesson?  @relation(fields: [lessonId], references: [id])
+
+  eventType String   // 'LOGIN', 'LESSON_OPEN', 'QUIZ_START', 'QUIZ_SUBMIT', 'TAB_OUT', 'IDLE', ...
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@map("activity_logs") // tên bảng thật trong DB
+  @@index([courseId, eventType, createdAt])
+  @@index([courseId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Alert {
+  id        Int      @id @default(autoincrement())
+  courseId  Int
+  userId    Int?
+  type      String
+  message   String
+  severity  String   // info | warning | danger
+  targetUrl String?
+  createdAt DateTime @default(now())
+
+  course Course @relation(fields: [courseId], references: [id])
+  user   User?  @relation(fields: [userId], references: [id])
+}
+
+model Recommendation {
+  id        Int      @id @default(autoincrement())
+  courseId  Int
+  userId    Int
+  lessonId  Int?
+  quizId    Int?
+  message   String
+  createdAt DateTime @default(now())
+
+  course Course @relation(fields: [courseId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+  lesson Lesson? @relation(fields: [lessonId], references: [id])
+  quiz   Quiz?   @relation(fields: [quizId], references: [id])
+}
+
+model CoursePrerequisite {
+  id                    Int    @id @default(autoincrement())
+  courseId              Int
+  prerequisiteCourseId  Int
+  course                Course @relation("CoursePrerequisites", fields: [courseId], references: [id])
+  prerequisite          Course @relation("CourseRequiredFor", fields: [prerequisiteCourseId], references: [id])
+
+  @@unique([courseId, prerequisiteCourseId])
+}
+
+model LessonPrerequisite {
+  id                 Int    @id @default(autoincrement())
+  lessonId           Int
+  prerequisiteLessonId Int
+  lesson             Lesson @relation("LessonPrerequisites", fields: [lessonId], references: [id])
+  prerequisite       Lesson @relation("LessonRequiredFor", fields: [prerequisiteLessonId], references: [id])
+
+  @@unique([lessonId, prerequisiteLessonId])
+}
+
+model LearningPath {
+  id          Int       @id @default(autoincrement())
+  title       String
+  slug        String    @unique
+  description String?
+  isPublished Boolean   @default(false)
+  createdById Int?
+  createdBy   User?     @relation("LearningPathCreator", fields: [createdById], references: [id])
+  items       LearningPathItem[]
+  enrollments LearningPathEnrollment[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model LearningPathItem {
+  id       Int      @id @default(autoincrement())
+  pathId   Int
+  courseId Int
+  order    Int
+  path     LearningPath @relation(fields: [pathId], references: [id])
+  course   Course       @relation(fields: [courseId], references: [id])
+
+  @@unique([pathId, courseId])
+}
+
+model LearningPathEnrollment {
+  id         Int      @id @default(autoincrement())
+  pathId     Int
+  userId     Int
+  status     String   @default("ACTIVE") // ACTIVE | COMPLETED | DROPPED
+  startedAt  DateTime @default(now())
+  completedAt DateTime?
+  path       LearningPath @relation(fields: [pathId], references: [id])
+  user       User         @relation(fields: [userId], references: [id])
+
+  @@unique([pathId, userId])
+}
