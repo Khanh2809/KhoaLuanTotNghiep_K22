@@ -1,3 +1,4 @@
+import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/db.js';
 
 function ensureInstructorOrAdmin(req) {
@@ -15,6 +16,21 @@ function normalizeSlug(title, slug) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return base || `path-${Date.now()}`;
+}
+
+// Đọc token nếu có (không bắt buộc) để xác định user hiện tại
+function getOptionalUserId(req) {
+  if (req.user?.id) return Number(req.user.id);
+  const token =
+    req.cookies?.token ||
+    (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.split(' ')[1] : null);
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    return Number(payload?.id) || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function listPaths(req, res) {
@@ -51,6 +67,7 @@ export async function listPaths(req, res) {
 
 export async function getPathDetail(req, res) {
   try {
+    const currentUserId = getOptionalUserId(req);
     const id = Number(req.params.id);
     if (!id) return res.status(400).json({ error: 'Invalid path id' });
     const row = await prisma.learningPath.findUnique({
@@ -70,14 +87,16 @@ export async function getPathDetail(req, res) {
             },
           },
         },
-        enrollments: { include: { user: { select: { id: true, name: true, email: true } } } },
+        enrollments: { select: { userId: true } },
       },
     });
     if (!row) return res.status(404).json({ error: 'Not found' });
     if (!row.isPublished && !(req.user?.role === 'admin' || req.user?.role === 'instructor')) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    return res.json(row);
+
+    const enrolled = !!row.enrollments?.some((e) => e.userId === currentUserId);
+    return res.json({ ...row, enrolled, currentUserId });
   } catch (err) {
     console.error('Get learning path failed', err);
     return res.status(500).json({ error: 'Failed to load learning path' });
@@ -88,7 +107,7 @@ export async function createPath(req, res) {
   try {
     ensureInstructorOrAdmin(req);
     const { title, description, slug, courseIds, isPublished } = req.body || {};
-    if (!title) return res.status(400).json({ error: 'title là bắt buộc' });
+    if (!title) return res.status(400).json({ error: 'title la bat buoc' });
     const normalizedSlug = normalizeSlug(title, slug);
     const uniqueSlug = `${normalizedSlug}-${Date.now()}`;
 
@@ -125,7 +144,7 @@ export async function enrollPath(req, res) {
     if (!pathId) return res.status(400).json({ error: 'Invalid pathId' });
 
     const path = await prisma.learningPath.findUnique({ where: { id: pathId }, select: { isPublished: true } });
-    if (!path) return res.status(404).json({ error: 'Learning path không tồn tại' });
+    if (!path) return res.status(404).json({ error: 'Learning path khong ton tai' });
     if (!path.isPublished && !(req.user?.role === 'admin' || req.user?.role === 'instructor')) {
       return res.status(403).json({ error: 'Forbidden' });
     }

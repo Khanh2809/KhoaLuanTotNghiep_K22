@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 import authRoutes from './routes/auth.routes.js';
 import coursesRoutes from './routes/courses.routes.js';
@@ -22,22 +24,53 @@ import reviewsRoutes from './routes/reviews.routes.js';
 import roleRequestRoutes from './routes/role-requests.routes.js';
 import learningPathRoutes from './routes/learning-path.routes.js';
 import certificatesRoutes from './routes/certificates.routes.js';
-
 const app = express();
 
 const FRONTEND_ORIGIN = process.env.FRONTEND_URL || 'http://localhost:3000';
+const EXTRA_ORIGINS = (process.env.FRONTEND_URLS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+const allowedOrigins = Array.from(
+  new Set([
+    FRONTEND_ORIGIN,
+    ...EXTRA_ORIGINS,
+    'http://localhost:3000', // dev local
+  ])
+);
+// Cho phép domain Vercel (preview/production) dạng *.vercel.app
+const allowedOriginPatterns = [/\.vercel\.app$/];
 
 app.use(cookieParser());
-app.use(express.json());
+// Tăng limit cho payload JSON/form để tránh lỗi PayloadTooLarge khi gửi nội dung lớn
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
-// ✅ CORS cho cookie – KHÔNG dùng '*'
+// Serve static uploads (demo): /images/<file> -> backend/public/images
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+app.use('/images', express.static(path.join(__dirname, '../public/images')));
+
 const corsOptions = {
-  origin: FRONTEND_ORIGIN,
+  origin(origin, callback) {
+    // Cho phAcp request khA'ng cA3 Origin (Postman, curl, ...)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin) || allowedOriginPatterns.some((re) => re.test(origin))) {
+      return callback(null, true);
+    }
+
+    console.log('CORS blocked origin:', origin);
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 };
-app.use(cors(corsOptions));           // đủ cho preflight, không cần app.options('*', ...)
+
+app.use(cors(corsOptions));
+         // О`ап cho preflight, khA'ng cазn app.options('*', ...)
 
 app.get('/', (_, res) => res.send('Backend API is running'));
 

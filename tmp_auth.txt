@@ -1,14 +1,8 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
 import { prisma } from '../lib/db.js';
+import crypto from 'crypto';
 import { mailer } from '../lib/mailer.js';
-
-const FRONTEND_URL = process.env.FRONTEND_URL || '';
-const isLocalEnv =
-  !FRONTEND_URL ||
-  FRONTEND_URL.includes('localhost') ||
-  FRONTEND_URL.includes('127.0.0.1');
 
 function signToken(user) {
   return jwt.sign({ id: user.id, role: user.role.name }, process.env.JWT_SECRET, { expiresIn: '7d' });
@@ -17,9 +11,8 @@ function signToken(user) {
 function setAuthCookie(res, token) {
   res.cookie('token', token, {
     httpOnly: true,
-    // Cho môi trường deploy (Vercel/Railway) cần cross-site cookie; localhost giữ nguyên lax
-    sameSite: isLocalEnv ? 'lax' : 'none',
-    secure: !isLocalEnv,
+    sameSite: 'lax',
+    secure: false, // để false khi chạy http localhost; production https => true
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 }
@@ -78,17 +71,7 @@ export async function me(req, res) {
 }
 
 export function logout(_req, res) {
-  // Cần truyền cùng thuộc tính sameSite/secure như lúc set để cookie cross-site được xóa
-  const FRONTEND_URL = process.env.FRONTEND_URL || '';
-  const isLocalEnv =
-    !FRONTEND_URL ||
-    FRONTEND_URL.includes('localhost') ||
-    FRONTEND_URL.includes('127.0.0.1');
-  res.clearCookie('token', {
-    httpOnly: true,
-    sameSite: isLocalEnv ? 'lax' : 'none',
-    secure: !isLocalEnv,
-  });
+  res.clearCookie('token');
   res.json({ ok: true });
 }
 
@@ -97,7 +80,7 @@ export async function forgotPassword(req, res) {
   if (!email) return res.status(400).json({ error: 'Missing email' });
 
   const user = await prisma.user.findUnique({ where: { email } });
-  // Trả lời mơ hồ để tránh lộ thông tin
+  // Trả lời mù để tránh lộ thông tin
   if (!user) return res.json({ message: 'If the email exists, a reset link has been sent.' });
 
   const rawToken = crypto.randomBytes(32).toString('base64url');
@@ -118,13 +101,15 @@ export async function forgotPassword(req, res) {
       <p><a href="${resetUrl}">${resetUrl}</a></p>
     `,
   });
+  
 
   res.json({ message: 'If the email exists, a reset link has been sent.' });
 }
 
 export async function resetPasswordController(req, res) {
   const { uid, token, newPassword } = req.body;
-  if (!uid || !token || !newPassword) return res.status(400).json({ error: 'Missing fields' });
+  if (!uid || !token || !newPassword)
+    return res.status(400).json({ error: 'Missing fields' });
 
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
@@ -145,3 +130,4 @@ export async function resetPasswordController(req, res) {
 
   res.json({ message: 'Đặt lại mật khẩu thành công' });
 }
+

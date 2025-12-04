@@ -1,7 +1,25 @@
+import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/db.js';
 
+// Read token if present (not required) to determine current user
+function getOptionalUserId(req) {
+  if (req.user?.id) return Number(req.user.id);
+  const token =
+    req.cookies?.token ||
+    (req.headers.authorization?.startsWith('Bearer ')
+      ? req.headers.authorization.split(' ')[1]
+      : null);
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    return Number(payload?.id) || null;
+  } catch {
+    return null;
+  }
+}
+
 // Public list categories for filters
-export async function listCategoriesPublic(req, res) {
+export async function listCategoriesPublic(_req, res) {
   try {
     const categories = await prisma.courseCategory.findMany({
       orderBy: { name: 'asc' },
@@ -13,14 +31,15 @@ export async function listCategoriesPublic(req, res) {
     res.status(500).json({ error: 'Failed to list categories' });
   }
 }
+
 // GET /api/courses?q=&cat=&level=&sort=&page=&pageSize=
 export async function listCourses(req, res) {
   try {
     const {
       q,
       cat,
-      level,                 // (d? d� n?u sau n�y c� enum Difficulty)
-      sort = 'recent',       // recent | rating
+      level,
+      sort = 'recent', // recent | rating
       page = '1',
       pageSize = '12',
     } = req.query;
@@ -48,7 +67,7 @@ export async function listCourses(req, res) {
           title: true,
           description: true,
           createdAt: true,
-          thumbnailUrl: true,                                  // ?? l?y thumbnail
+          thumbnailUrl: true,
           category: { select: { name: true } },
           instructor: { select: { name: true } },
           reviews: { select: { rating: true } },
@@ -60,9 +79,7 @@ export async function listCourses(req, res) {
 
     const mapped = items.map((c) => {
       const ratings = c.reviews.map((r) => r.rating);
-      const ratingAvg = ratings.length
-        ? ratings.reduce((a, b) => a + b, 0) / ratings.length
-        : 0;
+      const ratingAvg = ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
       const lessonCount = c.modules.reduce((sum, m) => sum + m.lessons.length, 0);
 
       return {
@@ -73,7 +90,7 @@ export async function listCourses(req, res) {
         instructor: c.instructor?.name ?? null,
         ratingAvg: Number(ratingAvg.toFixed(2)),
         lessonCount,
-        thumbnailUrl: c.thumbnailUrl ?? null,                  // ?? tr? v? cho FE
+        thumbnailUrl: c.thumbnailUrl ?? null,
       };
     });
 
@@ -94,6 +111,7 @@ export async function listCourses(req, res) {
 // GET /api/courses/:id
 export async function getCourseDetail(req, res) {
   try {
+    const currentUserId = getOptionalUserId(req);
     const id = Number(req.params.id);
     const course = await prisma.course.findUnique({
       where: { id },
@@ -114,38 +132,52 @@ export async function getCourseDetail(req, res) {
     });
     if (!course) return res.status(404).json({ error: 'Course not found' });
 
-    // x�c d?nh owner/admin
+    // Determine owner/admin
     const requester = req.user ?? null;
-    const isOwner = requester?.role === 'instructor' &&
-                    !!(await prisma.course.findFirst({
-                      where: { id, instructorId: requester.id },
-                      select: { id: true }
-                    })) || requester?.role === 'admin';
+    const isOwner =
+      (requester?.role === 'instructor' &&
+        !!(await prisma.course.findFirst({
+          where: { id, instructorId: requester.id },
+          select: { id: true },
+        }))) ||
+      requester?.role === 'admin';
 
-    // ch?n ngu?i l? n?u chua publish
+    // Block if unpublished for non-owner
     if (!isOwner && course.status !== 'PUBLISHED') {
       return res.status(403).json({ error: 'Course not published' });
     }
 
     const ratings = course.reviews.map((r) => r.rating);
-    const ratingAvg = ratings.length ? ratings.reduce((a,b)=>a+b,0)/ratings.length : 0;
+    const ratingAvg = ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
 
-    // ?? TH�M 2 TRU?NG isOwner + status
+    const enrolled = currentUserId
+      ? !!(await prisma.enrollment.findUnique({
+          where: { userId_courseId: { userId: currentUserId, courseId: id } },
+          select: { id: true },
+        }))
+      : false;
+
     res.json({
       id: course.id,
       title: course.title,
       description: course.description,
       category: course.category?.name ?? null,
-      instructor: course.instructor,          // { id, name }
+      instructor: course.instructor, // { id, name }
       ratingAvg: Number(ratingAvg.toFixed(2)),
       thumbnailUrl: course.thumbnailUrl ?? null,
-      status: course.status,                  // ?? th�m
-      isOwner,                                // ?? th�m
+      status: course.status,
+      isOwner,
+      enrolled,
       modules: course.modules.map((m) => ({
         id: m.id,
         title: m.title,
         order: m.order,
-        lessons: m.lessons.map((ls) => ({ id: ls.id, title: ls.title, order: ls.order, quizId: ls.quizzes?.[0]?.id ?? null })),
+        lessons: m.lessons.map((ls) => ({
+          id: ls.id,
+          title: ls.title,
+          order: ls.order,
+          quizId: ls.quizzes?.[0]?.id ?? null,
+        })),
       })),
     });
   } catch (err) {
@@ -153,14 +185,4 @@ export async function getCourseDetail(req, res) {
     res.status(500).json({ error: 'Failed to get course detail' });
   }
 }
-
-
-
-
-
-
-
-
-
-
 

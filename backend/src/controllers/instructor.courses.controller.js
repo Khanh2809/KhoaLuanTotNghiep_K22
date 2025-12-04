@@ -29,9 +29,16 @@ export async function createCourse(req, res) {
   try {
     const uid = req.user.id;
     const { title, description, categoryId, thumbnailUrl } = req.body;
+    const uploadedThumb = req.file ? `/images/${req.file.filename}` : null;
     if (!title) return res.status(400).json({ error: 'title required' });
     const c = await prisma.course.create({
-      data: { title, description, categoryId: categoryId ?? null, thumbnailUrl: thumbnailUrl ?? null, instructorId: uid },
+      data: {
+        title,
+        description,
+        categoryId: categoryId ?? null,
+        thumbnailUrl: uploadedThumb ?? thumbnailUrl ?? null,
+        instructorId: uid,
+      },
       select: { id: true },
     });
     res.status(201).json({ id: c.id });
@@ -63,12 +70,13 @@ export async function updateCourse(req, res) {
   try {
     const id = Number(req.params.id);
     const { title, description, categoryId, thumbnailUrl, status } = req.body;
+    const uploadedThumb = req.file ? `/images/${req.file.filename}` : null;
     const c = await prisma.course.update({
       where: { id },
       data: {
         title, description,
         categoryId: categoryId ?? undefined,
-        thumbnailUrl: thumbnailUrl ?? undefined,
+        thumbnailUrl: uploadedThumb ?? thumbnailUrl ?? undefined,
         status: status ?? undefined, // 'DRAFT' | 'PUBLISHED'
       },
     });
